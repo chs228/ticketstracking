@@ -211,17 +211,24 @@ def refresh_user_token():
                 expires_in = int(user['expiresIn'])
                 login_time = st.session_state.get('login_time', 0)
                 current_time = time.time()
-                # Refresh if token is close to expiring (e.g., within 5 minutes)
                 if current_time - login_time > expires_in - 300:
                     refreshed_user = auth.refresh(user['refreshToken'])
-                    st.session_state.user = refreshed_user
+                    st.session_state.user = {
+                        'idToken': refreshed_user['idToken'],
+                        'refreshToken': refreshed_user['refreshToken'],
+                        'expiresIn': refreshed_user['expiresIn'],
+                        'localId': refreshed_user['userId']
+                    }
                     st.session_state.user_id = refreshed_user['userId']
                     st.session_state.login_time = time.time()
+                    st.session_state.debug_auth = "Token refreshed successfully"
                     return True
+            st.session_state.debug_auth = "Token still valid"
             return True
         except Exception as e:
-            st.error(f"Token refresh failed: {e}")
+            st.session_state.debug_auth = f"Token refresh failed: {str(e)}"
             return False
+    st.session_state.debug_auth = "No user session found"
     return False
 
 # Send email
@@ -683,11 +690,15 @@ def login():
     # Check if user is already authenticated
     if "user" in st.session_state and st.session_state.user:
         if refresh_user_token():
+            # Debug: Display authentication status
+            if "debug_auth" in st.session_state:
+                st.info(f"Auth Debug: {st.session_state.debug_auth}")
             return True
         else:
             st.session_state.user = None
             st.session_state.user_id = None
             st.session_state.user_info = None
+            st.session_state.debug_auth = "Session cleared due to refresh failure"
     
     st.session_state.user = None
     with st.container():
@@ -702,7 +713,12 @@ def login():
                 if st.button("Login", key="login_btn"):
                     try:
                         user = auth.sign_in_with_email_and_password(email, password)
-                        st.session_state.user = user
+                        st.session_state.user = {
+                            'idToken': user['idToken'],
+                            'refreshToken': user['refreshToken'],
+                            'expiresIn': user['expiresIn'],
+                            'localId': user['localId']
+                        }
                         st.session_state.user_id = user['localId']
                         st.session_state.login_time = time.time()
                         user_info = get_user_info(user['localId'])
@@ -715,9 +731,11 @@ def login():
                             }
                             db.child("users").child(user['localId']).set(user_info)
                         st.session_state.user_info = user_info
+                        st.session_state.debug_auth = "Login successful"
                         st.success("Logged in successfully!")
                         st.rerun()
                     except Exception as e:
+                        st.session_state.debug_auth = f"Login failed: {str(e)}"
                         st.error(f"Login failed: {e}")
             elif login_option == "Sign Up":
                 email = st.text_input("Email")
@@ -731,7 +749,12 @@ def login():
                     else:
                         try:
                             user = auth.create_user_with_email_and_password(email, password)
-                            st.session_state.user = user
+                            st.session_state.user = {
+                                'idToken': user['idToken'],
+                                'refreshToken': user['refreshToken'],
+                                'expiresIn': user['expiresIn'],
+                                'localId': user['localId']
+                            }
                             st.session_state.user_id = user['localId']
                             st.session_state.login_time = time.time()
                             username = extract_username_from_email(email)
@@ -742,10 +765,15 @@ def login():
                             }
                             db.child("users").child(user['localId']).set(user_info)
                             st.session_state.user_info = user_info
+                            st.session_state.debug_auth = "Signup successful"
                             st.success("Account created and logged in!")
                             st.rerun()
                         except Exception as e:
+                            st.session_state.debug_auth = f"Signup failed: {str(e)}"
                             st.error(f"Sign up failed: {e}")
+            # Debug: Display authentication status
+            if "debug_auth" in st.session_state:
+                st.info(f"Auth Debug: {st.session_state.debug_auth}")
             st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('<div class="footer">Task Management System © 2025</div>', unsafe_allow_html=True)
     return False
@@ -1031,21 +1059,22 @@ def show_tasks(user_id, user_info):
             st.markdown('</div>', unsafe_allow_html=True)
     
     # Create or edit task
+    today = datetime.now().strftime('%Y-%m-%d')
     if st.session_state.show_create_task and st.session_state.active_task:
         task = next((t for t in tasks if t['id'] == st.session_state.active_task), None)
         st.markdown("### Edit Task")
     else:
         st.markdown("### Create New Task")
         task = None
-    with st.form("task_form"):
-        title = st.text_input("Task Title", value=task.get('title', '') if task else '')
-        description = st.text_area("Description", value=task.get('description', '') if task else '')
-        issue_type = st.selectbox("Issue Type", ISSUE_TYPES, index=ISSUE_TYPES.index(task.get('issue_type', 'Other')) if task else 0)
-        priority = st.selectbox("Priority", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(task.get('priority', 'Medium')) if task else 1)
-        status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(task.get('status', 'To Do')) if task else 0)
+    with st.form(key="task_form", clear_on_submit=False):
+        title = st.text_input("Task Title", value=task.get('title', 'Basic ui design') if task else 'Basic ui design')
+        description = st.text_area("Description", value=task.get('description', 'Pleaase') if task else 'Pleaase')
+        issue_type = st.selectbox("Issue Type", ISSUE_TYPES, index=ISSUE_TYPES.index(task.get('issue_type', 'Feature')) if task else ISSUE_TYPES.index('Feature'))
+        priority = st.selectbox("Priority", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(task.get('priority', 'Critical')) if task else PRIORITY_OPTIONS.index('Critical'))
+        status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(task.get('status', 'To Do')) if task else STATUS_OPTIONS.index('To Do'))
         assignee_options = ["Unassigned"] + [m['username'] for m in team_members]
         assignee = st.selectbox("Assignee", assignee_options, 
-                                index=([m['username'] for m in team_members].index(task.get('assignee_username', 'Unassigned')) + 1) if task and task.get('assignee_username') in [m['username'] for m in team_members] else 0)
+                                index=([m['username'] for m in team_members].index(task.get('assignee_username', 'chsubhash939')) + 1) if task and task.get('assignee_username') in [m['username'] for m in team_members] else assignee_options.index('chsubhash939') if 'chsubhash939' in assignee_options else 0)
         due_date = st.date_input("Due Date", value=datetime.strptime(task.get('due_date', today), '%Y-%m-%d') if task and task.get('due_date') else datetime.now())
         submit = st.form_submit_button("Save Task")
         if submit:
@@ -1150,6 +1179,7 @@ def show_issues(user_id, user_info):
             st.markdown('</div>', unsafe_allow_html=True)
     
     # Create or edit issue
+    today = datetime.now().strftime('%Y-%m-%d')
     if st.session_state.show_create_issue and st.session_state.active_issue:
         issue = next((i for i in issues if i['id'] == st.session_state.active_issue), None)
         st.markdown("### Edit Issue")
@@ -1321,6 +1351,8 @@ if "show_project_settings" not in st.session_state:
     st.session_state.show_project_settings = False
 if "login_time" not in st.session_state:
     st.session_state.login_time = 0
+if "debug_auth" not in st.session_state:
+    st.session_state.debug_auth = ""
 
 # Main app
 def main():
@@ -1345,6 +1377,7 @@ def main():
             st.session_state.user_info = None
             st.session_state.active_project = None
             st.session_state.login_time = 0
+            st.session_state.debug_auth = "Logged out"
             st.rerun()
     try:
         if nav_selection == "Dashboard":
