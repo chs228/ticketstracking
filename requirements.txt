@@ -2,5 +2,3 @@ streamlit
 pandas
 pyrebase
 fpdf
-plotly
-smtplib
