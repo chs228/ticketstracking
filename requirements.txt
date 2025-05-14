@@ -1,4 +1,4 @@
 streamlit
 pandas
-pyrebase
+pyrebase4==4.8.0
 fpdf
