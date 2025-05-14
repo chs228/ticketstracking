@@ -44,7 +44,7 @@ EMAIL_PASSWORD = "zgwynxksfnwzusyk"
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 
-# Task priority and status options
+# Task priority, status, and issue type options
 PRIORITY_OPTIONS = ["Low", "Medium", "High", "Critical"]
 STATUS_OPTIONS = ["To Do", "In Progress", "On Hold", "Done"]
 ISSUE_TYPES = ["Bug", "Feature", "Enhancement", "Documentation", "Other"]
@@ -337,9 +337,10 @@ def generate_task_report_pdf(tasks, user_info, team_members):
     pdf.cell(0, 10, "Task Details", ln=True)
     
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(60, 10, "Task Name", border=1)
+    pdf.cell(50, 10, "Task Name", border=1)
     pdf.cell(30, 10, "Priority", border=1)
     pdf.cell(30, 10, "Status", border=1)
+    pdf.cell(30, 10, "Issue Type", border=1)
     pdf.cell(40, 10, "Assignee", border=1)
     pdf.cell(30, 10, "Due Date", border=1, ln=True)
     
@@ -355,9 +356,10 @@ def generate_task_report_pdf(tasks, user_info, team_members):
         if len(task_name) > 20:
             task_name = task_name[:17] + "..."
         
-        pdf.cell(60, 10, task_name, border=1)
+        pdf.cell(50, 10, task_name, border=1)
         pdf.cell(30, 10, task.get('priority', 'Medium'), border=1)
         pdf.cell(30, 10, task.get('status', 'To Do'), border=1)
+        pdf.cell(30, 10, task.get('issue_type', 'Other'), border=1)
         pdf.cell(40, 10, assignee_username, border=1)
         due_date = task.get('due_date', '')
         pdf.cell(30, 10, due_date, border=1, ln=True)
@@ -438,6 +440,7 @@ def generate_eod_report(tasks, user_info, team_members):
                     <th>Task</th>
                     <th>Status</th>
                     <th>Priority</th>
+                    <th>Issue Type</th>
                     <th>Assignee</th>
                 </tr>
         """
@@ -456,6 +459,7 @@ def generate_eod_report(tasks, user_info, team_members):
                     <td>{task.get('title', 'Unnamed Task')}</td>
                     <td>{task.get('status', 'To Do')}</td>
                     <td>{task.get('priority', 'Medium')}</td>
+                    <td>{task.get('issue_type', 'Other')}</td>
                     <td>{assignee_username}</td>
                 </tr>
             """
@@ -472,6 +476,7 @@ def generate_eod_report(tasks, user_info, team_members):
                     <th>Task</th>
                     <th>Due Date</th>
                     <th>Priority</th>
+                    <th>Issue Type</th>
                     <th>Assignee</th>
                 </tr>
         """
@@ -490,6 +495,7 @@ def generate_eod_report(tasks, user_info, team_members):
                     <td>{task.get('title', 'Unnamed Task')}</td>
                     <td>{task.get('due_date', 'No due date')}</td>
                     <td>{task.get('priority', 'Medium')}</td>
+                    <td>{task.get('issue_type', 'Other')}</td>
                     <td>{assignee_username}</td>
                 </tr>
             """
@@ -677,19 +683,25 @@ def login():
 # Task management functions
 def create_task(project_id, task_data):
     if not db:
+        st.error("Firebase database is not initialized.")
         return False
     
     try:
         task_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         task_data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         task_id = db.child("tasks").child(project_id).push(task_data)
-        return True
+        if task_id:
+            return True
+        else:
+            st.error("Failed to create task: No task ID returned.")
+            return False
     except Exception as e:
         st.error(f"Error creating task: {e}")
         return False
 
 def update_task(project_id, task_id, task_data):
     if not db:
+        st.error("Firebase database is not initialized.")
         return False
     
     try:
@@ -702,6 +714,7 @@ def update_task(project_id, task_id, task_data):
 
 def delete_task(project_id, task_id):
     if not db:
+        st.error("Firebase database is not initialized.")
         return False
     
     try:
@@ -713,6 +726,7 @@ def delete_task(project_id, task_id):
 
 def create_project(project_data, user_id):
     if not db:
+        st.error("Firebase database is not initialized.")
         return None
     
     try:
@@ -730,11 +744,13 @@ def create_project(project_data, user_id):
 
 def add_project_member(project_id, email, role="member"):
     if not db:
+        st.error("Firebase database is not initialized.")
         return False
     
     try:
-        users = db.child("  users").get().val()
+        users = db.child("users").get().val()
         if not users:
+            st.error("No users found in database.")
             return False
         
         user_id = None
@@ -744,6 +760,7 @@ def add_project_member(project_id, email, role="member"):
                 break
         
         if not user_id:
+            st.error(f"User with email {email} not found.")
             return False
         
         db.child("project_members").child(project_id).child(user_id).set(role)
@@ -754,6 +771,7 @@ def add_project_member(project_id, email, role="member"):
 
 def remove_project_member(project_id, user_id):
     if not db:
+        st.error("Firebase database is not initialized.")
         return False
     
     try:
@@ -867,12 +885,18 @@ def show_tasks(user_id, user_info):
     st.markdown("### Filters")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.session_state.filter_status = st.selectbox("Status", ["All"] + STATUS_OPTIONS, key="filter_status")
+        selected_status = st.selectbox("Status", ["All"] + STATUS_OPTIONS, key="filter_status", index=["All"] + STATUS_OPTIONS.index(st.session_state.filter_status) if st.session_state.filter_status in STATUS_OPTIONS else 0)
+        if selected_status != st.session_state.filter_status:
+            st.session_state.filter_status = selected_status
     with col2:
-        st.session_state.filter_priority = st.selectbox("Priority", ["All"] + PRIORITY_OPTIONS, key="filter_priority")
+        selected_priority = st.selectbox("Priority", ["All"] + PRIORITY_OPTIONS, key="filter_priority", index=["All"] + PRIORITY_OPTIONS.index(st.session_state.filter_priority) if st.session_state.filter_priority in PRIORITY_OPTIONS else 0)
+        if selected_priority != st.session_state.filter_priority:
+            st.session_state.filter_priority = selected_priority
     with col3:
         assignee_options = ["All"] + [m['username'] for m in team_members]
-        st.session_state.filter_assignee = st.selectbox("Assignee", assignee_options, key="filter_assignee")
+        selected_assignee = st.selectbox("Assignee", assignee_options, key="filter_assignee", index=assignee_options.index(st.session_state.filter_assignee) if st.session_state.filter_assignee in assignee_options else 0)
+        if selected_assignee != st.session_state.filter_assignee:
+            st.session_state.filter_assignee = selected_assignee
     
     # Apply filters
     filtered_tasks = tasks
@@ -891,6 +915,7 @@ def show_tasks(user_id, user_info):
             st.markdown(f'<div class="card-subtitle">{task.get("description", "No description")}</div>', unsafe_allow_html=True)
             st.markdown(f'<span class="tag priority-{task.get("priority", "Medium").lower()}">{task.get("priority", "Medium")}</span>', unsafe_allow_html=True)
             st.markdown(f'<span class="tag status-{task.get("status", "To Do").lower().replace(" ", "-")}">{task.get("status", "To Do")}</span>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card-subtitle">Issue Type: {task.get("issue_type", "Other")}</div>', unsafe_allow_html=True)
             
             assignee = "Unassigned"
             for member in team_members:
@@ -900,13 +925,17 @@ def show_tasks(user_id, user_info):
             st.markdown(f'<div class="card-subtitle">Assignee: {assignee}</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="card-subtitle">Due: {task.get("due_date", "No due date")}</div>', unsafe_allow_html=True)
             
-            if st.button("Edit", key=f"edit_task_{task['id']}"):
-                st.session_state.active_task = task['id']
-                st.session_state.show_create_task = True
-            if st.button("Delete", key=f"delete_task_{task['id']}"):
-                if delete_task(project_id, task['id']):
-                    st.success("Task deleted!")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Edit", key=f"edit_task_{task['id']}"):
+                    st.session_state.active_task = task['id']
+                    st.session_state.show_create_task = True
                     st.rerun()
+            with col2:
+                if st.button("Delete", key=f"delete_task_{task['id']}"):
+                    if delete_task(project_id, task['id']):
+                        st.success("Task deleted!")
+                        st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
     
@@ -921,34 +950,45 @@ def show_tasks(user_id, user_info):
     with st.form("task_form"):
         title = st.text_input("Task Title", value=task.get('title', '') if task else '')
         description = st.text_area("Description", value=task.get('description', '') if task else '')
+        issue_type = st.selectbox("Issue Type", ISSUE_TYPES, index=ISSUE_TYPES.index(task.get('issue_type', 'Other')) if task else 0)
         priority = st.selectbox("Priority", PRIORITY_OPTIONS, index=PRIORITY_OPTIONS.index(task.get('priority', 'Medium')) if task else 1)
         status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(task.get('status', 'To Do')) if task else 0)
-        assignee = st.selectbox("Assignee", ["Unassigned"] + [m['username'] for m in team_members], 
+        assignee_options = ["Unassigned"] + [m['username'] for m in team_members]
+        assignee = st.selectbox("Assignee", assignee_options, 
                                 index=([m['username'] for m in team_members].index(task.get('assignee_username', 'Unassigned')) + 1) if task and task.get('assignee_username') in [m['username'] for m in team_members] else 0)
         due_date = st.date_input("Due Date", value=datetime.strptime(task.get('due_date', today), '%Y-%m-%d') if task and task.get('due_date') else datetime.now())
         
         submit = st.form_submit_button("Save Task")
         
         if submit:
-            task_data = {
-                "title": title,
-                "description": description,
-                "priority": priority,
-                "status": status,
-                "assignee": next((m['id'] for m in team_members if m['username'] == assignee), None) if assignee != "Unassigned" else None,
-                "due_date": due_date.strftime('%Y-%m-%d')
-            }
-            if task:
-                if update_task(project_id, st.session_state.active_task, task_data):
-                    st.success("Task updated!")
-                    st.session_state.show_create_task = False
-                    st.session_state.active_task = None
-                    st.rerun()
+            if not title:
+                st.error("Task title is required.")
             else:
-                if create_task(project_id, task_data):
-                    st.success("Task created!")
-                    st.session_state.show_create_task = False
-                    st.rerun()
+                task_data = {
+                    "title": title,
+                    "description": description,
+                    "issue_type": issue_type,
+                    "priority": priority,
+                    "status": status,
+                    "assignee": next((m['id'] for m in team_members if m['username'] == assignee), None) if assignee != "Unassigned" else None,
+                    "assignee_username": assignee if assignee != "Unassigned" else None,
+                    "due_date": due_date.strftime('%Y-%m-%d')
+                }
+                if task:
+                    if update_task(project_id, st.session_state.active_task, task_data):
+                        st.success("Task updated!")
+                        st.session_state.show_create_task = False
+                        st.session_state.active_task = None
+                        st.rerun()
+                    else:
+                        st.error("Failed to update task.")
+                else:
+                    if create_task(project_id, task_data):
+                        st.success("Task created!")
+                        st.session_state.show_create_task = False
+                        st.rerun()
+                    else:
+                        st.error("Failed to create task. Check Firebase configuration and permissions.")
 
 def show_team(user_id, user_info):
     st.markdown('<h2 class="tab-subheader">Team</h2>', unsafe_allow_html=True)
