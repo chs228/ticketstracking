@@ -1,850 +1,878 @@
 import streamlit as st
-import firebase_admin
-from firebase_admin import credentials, firestore, auth
-import datetime
 import pandas as pd
-import json
-import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import uuid
 import re
-import requests
+import io
+import base64
+import os
+import random
+from datetime import datetime, timedelta
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+import pyrebase
+import uuid
+import json
+from fpdf import FPDF
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Firebase configuration
 firebase_config = {
-    "apiKey": "AIzaSyAN9WM1cE-2Hmy6vuq3Bs-0EWbGOFObCAY",
-    "authDomain": "placements-e85b2.firebaseapp.com",
-    "databaseURL": "https://placements-e85b2-default-rtdb.firebaseio.com",
-    "projectId": "placements-e85b2",
-    "storageBucket": "placements-e85b2.firebasestorage.app",
-    "messagingSenderId": "26443880227",
-    "appId": "1:26443880227:web:c0f5e7f9d325497e9e1e96",
-    "measurementId": "G-J1QMLJ1MHJ"
+    "apiKey": "AIzaSyDvFFLr-Fjhma2yae7rx3r7Ei0J6bXJmmI",
+    "authDomain": "client-2bbfc.firebaseapp.com",
+    "databaseURL": "https://client-2bbfc-default-rtdb.firebaseio.com",
+    "projectId": "client-2bbfc",
+    "storageBucket": "client-2bbfc.firebasestorage.app",
+    "messagingSenderId": "971318119261",
+    "appId": "1:971318119261:web:0cf9b5f290f1589326f6b4",
+    "measurementId": "G-5YHQGXBXJG"
 }
 
-# Firebase REST API endpoints
-AUTH_BASE_URL = "https://identitytoolkit.googleapis.com/v1"
-API_KEY = firebase_config["apiKey"]
+# Initialize Firebase
+try:
+    firebase = pyrebase.initialize_app(firebase_config)
+    auth = firebase.auth()
+    db = firebase.database()
+except Exception as e:
+    st.error(f"Firebase initialization failed: {e}. Check configuration.")
+    auth = None
+    db = None
 
-# Initialize Firebase if not already initialized
-if not firebase_admin._apps:
-    try:
-        # For production use with your Firebase credentials
-        if os.path.exists("firebase_service_account.json"):
-            cred_obj = credentials.Certificate("firebase_service_account.json")
-        else:
-            # Create a minimal service account dict with just the project_id
-            cred = {
-                "type": "service_account",
-                "project_id": firebase_config["projectId"],
-            }
-            cred_obj = credentials.Certificate(cred)
-        
-        firebase_admin.initialize_app(cred_obj)
-        st.session_state.firebase_configured = True
-    except Exception as e:
-        st.warning(f"Running in demo mode: {str(e)}")
-        st.session_state.firebase_configured = False
+# Email configuration
+EMAIL_SENDER = "projecttestingsubhash@gmail.com"
+EMAIL_PASSWORD = "zgwynxksfnwzusyk"
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
 
-# Page configuration
-st.set_page_config(
-    page_title="Task Management System",
-    page_icon="📋",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Task priority and status options
+PRIORITY_OPTIONS = ["Low", "Medium", "High", "Critical"]
+STATUS_OPTIONS = ["To Do", "In Progress", "On Hold", "Done"]
+ISSUE_TYPES = ["Bug", "Feature", "Enhancement", "Documentation", "Other"]
 
-# Apply custom CSS to make the app beautiful
-st.markdown("""
-<style>
-    /* Global font and styling */
-    * {
-        font-family: 'Roboto', sans-serif;
-    }
-    
-    /* Header styling */
-    .main-header {
-        color: #3366ff;
-        font-weight: bold;
-        font-size: 2.5em;
-        margin-bottom: 20px;
-        text-align: center;
-    }
-    
-    /* Subheader styling */
-    .sub-header {
-        color: #0047ab;
-        font-weight: 500;
-        font-size: 1.5em;
-        margin-bottom: 15px;
-    }
-    
-    /* Card styling */
-    .card {
-        background-color: #f8f9fa;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    
-    /* Button styling */
-    .stButton>button {
-        background-color: #3366ff;
-        color: white;
-        border-radius: 5px;
-        border: none;
-        padding: 10px 24px;
-        font-weight: 500;
-    }
-    
-    .stButton>button:hover {
-        background-color: #254EDB;
-    }
-    
-    /* Status colors */
-    .status-todo {
-        background-color: #FFE0E0;
-        padding: 3px 10px;
-        border-radius: 15px;
-        font-weight: 500;
-    }
-    
-    .status-in-progress {
-        background-color: #FFF4CC;
-        padding: 3px 10px;
-        border-radius: 15px;
-        font-weight: 500;
-    }
-    
-    .status-done {
-        background-color: #CCFFCC;
-        padding: 3px 10px;
-        border-radius: 15px;
-        font-weight: 500;
-    }
-    
-    /* Task list styling */
-    .task-list {
-        margin-top: 20px;
-    }
-    
-    /* Form styling */
-    .stTextInput>div>div>input, .stSelectbox>div>div>select {
-        border-radius: 5px;
-    }
-    
-    /* Adjust dataframe styling */
-    .dataframe {
-        border-radius: 10px;
-        overflow: hidden;
-    }
-    
-    .dataframe th {
-        background-color: #3366ff;
-        color: white;
-    }
-    
-    .dataframe tr:nth-child(even) {
-        background-color: #f2f2f2;
-    }
-    
-    /* Priority coloring */
-    .priority-high {
-        color: #ff4d4d;
-        font-weight: bold;
-    }
-    
-    .priority-medium {
-        color: #ff9933;
-        font-weight: bold;
-    }
-    
-    .priority-low {
-        color: #33cc33;
-        font-weight: bold;
-    }
-    
-    /* Dashboard metrics */
-    .metric-container {
-        display: flex;
-        justify-content: space-between;
-        margin-bottom: 20px;
-    }
-    
-    .metric-card {
-        background-color: white;
-        border-radius: 10px;
-        padding: 15px;
-        width: 23%;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    
-    .metric-title {
-        font-size: 0.9em;
-        color: #666;
-    }
-    
-    .metric-value {
-        font-size: 1.8em;
-        font-weight: bold;
-        color: #3366ff;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Colors for different priorities and statuses
+PRIORITY_COLORS = {
+    "Low": "#28a745",      # Green
+    "Medium": "#ffc107",   # Yellow
+    "High": "#fd7e14",     # Orange
+    "Critical": "#dc3545"  # Red
+}
 
-# Create a demo database if not connected to Firebase
-class DemoDatabase:
-    def __init__(self):
-        self.tasks = {}
-        self.users = {
-            "demo_user@example.com": {
-                "password": "password123",
-                "username": "demo_user",
-                "user_id": "demo_uid_12345"
-            }
+STATUS_COLORS = {
+    "To Do": "#6c757d",        # Gray
+    "In Progress": "#007bff",  # Blue
+    "On Hold": "#6f42c1",      # Purple
+    "Done": "#28a745"          # Green
+}
+
+# Custom CSS
+def load_css():
+    st.markdown("""
+    <style>
+        .main-header {
+            font-size: 2.5rem !important;
+            font-weight: 700 !important;
+            color: #3366ff !important;
+            margin-bottom: 1.5rem !important;
+            text-align: center !important;
         }
-        # Add some sample tasks
-        sample_tasks = [
-            {
-                "task_id": str(uuid.uuid4()),
-                "title": "Create website mockup",
-                "description": "Design initial website mockups for client review",
-                "status": "In Progress",
-                "priority": "High",
-                "assignee": "demo_user",
-                "due_date": (datetime.datetime.now() + datetime.timedelta(days=3)).strftime("%Y-%m-%d"),
-                "created_at": datetime.datetime.now().strftime("%Y-%m-%d"),
-                "created_by": "demo_user"
-            },
-            {
-                "task_id": str(uuid.uuid4()),
-                "title": "Fix login bug",
-                "description": "Users are experiencing issues with the login system",
-                "status": "To Do",
-                "priority": "Medium",
-                "assignee": "demo_user",
-                "due_date": (datetime.datetime.now() + datetime.timedelta(days=5)).strftime("%Y-%m-%d"),
-                "created_at": datetime.datetime.now().strftime("%Y-%m-%d"),
-                "created_by": "demo_user"
-            },
-            {
-                "task_id": str(uuid.uuid4()),
-                "title": "Update documentation",
-                "description": "Update API documentation with new endpoints",
-                "status": "Done",
-                "priority": "Low",
-                "assignee": "demo_user",
-                "due_date": (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
-                "created_at": datetime.datetime.now().strftime("%Y-%m-%d"),
-                "created_by": "demo_user"
-            }
-        ]
         
-        for task in sample_tasks:
-            self.tasks[task["task_id"]] = task
-    
-    def collection(self, name):
-        return self
-    
-    def document(self, doc_id):
-        return self
-    
-    def get(self):
-        class MockDocSnapshot:
-            def __init__(self, data, id):
-                self.data_dict = data
-                self.id = id
-                
-            def to_dict(self):
-                return self.data_dict
-                
-            def id(self):
-                return self.id
+        .card {
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
         
-        class MockQuerySnapshot:
-            def __init__(self, docs):
-                self.docs = docs
-                
-        doc_snapshots = []
-        for task_id, task_data in self.tasks.items():
-            doc_snapshots.append(MockDocSnapshot(task_data, task_id))
-            
-        return MockQuerySnapshot(doc_snapshots)
-    
-    def set(self, data):
-        if "task_id" in data:
-            self.tasks[data["task_id"]] = data
-        return True
-    
-    def add(self, data):
-        task_id = str(uuid.uuid4())
-        data["task_id"] = task_id
-        self.tasks[task_id] = data
-        return task_id
-    
-    def update(self, data):
-        task_id = data.get("task_id")
-        if task_id in self.tasks:
-            self.tasks[task_id].update(data)
-        return True
-    
-    def delete(self):
-        # This would delete the document but we're not implementing it fully for the demo
-        return True
-    
-    def where(self, field, op, value):
-        # Basic filtering
-        filtered_db = DemoDatabase()
-        filtered_db.tasks = {}
+        .card:hover {
+            transform: translateY(-5px);
+        }
         
-        for task_id, task in self.tasks.items():
-            if field in task:
-                if op == "==" and task[field] == value:
-                    filtered_db.tasks[task_id] = task
-                elif op == ">" and task[field] > value:
-                    filtered_db.tasks[task_id] = task
-                elif op == "<" and task[field] < value:
-                    filtered_db.tasks[task_id] = task
+        .card-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
         
-        return filtered_db
+        .card-subtitle {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-bottom: 0.5rem;
+        }
+        
+        .tag {
+            border-radius: 4px;
+            padding: 0.2rem 0.5rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: white;
+            display: inline-block;
+            margin-right: 0.3rem;
+        }
+        
+        .priority-low {
+            background-color: #28a745;
+        }
+        
+        .priority-medium {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .priority-high {
+            background-color: #fd7e14;
+        }
+        
+        .priority-critical {
+            background-color: #dc3545;
+        }
+        
+        .status-todo {
+            background-color: #6c757d;
+        }
+        
+        .status-progress {
+            background-color: #007bff;
+        }
+        
+        .status-hold {
+            background-color: #6f42c1;
+        }
+        
+        .status-done {
+            background-color: #28a745;
+        }
+        
+        .tab-subheader {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #495057;
+        }
+        
+        .stat-box {
+            text-align: center;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background-color: #f8f9fa;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #3366ff;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        
+        .form-container {
+            background-color: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .btn-primary {
+            background-color: #3366ff;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            color: white;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        
+        .btn-primary:hover {
+            background-color: #2952cc;
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            color: white;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #dee2e6;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        
+        .profile-container {
+            text-align: center;
+            padding: 1.5rem;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 1.5rem;
+        }
+        
+        .profile-name {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .profile-email {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        
+        .profile-stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 1rem;
+        }
+        
+        .profile-stat {
+            text-align: center;
+        }
+        
+        .profile-stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #3366ff;
+        }
+        
+        .profile-stat-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        
+        /* Animation for loader */
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+        
+        .loading {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
-demo_db = DemoDatabase()
-
-def get_db():
-    """Get database instance (either Firebase or demo)"""
-    if st.session_state.get("firebase_configured", False):
-        # Use Firestore for main database operations
-        return firestore.client()
-    else:
-        return demo_db
-
-def authenticate_user(email, password):
-    """Authenticate user with Firebase or demo DB"""
+# Function to send email
+def send_email(recipient_email, subject, body, attachment_path=None):
+    """Send email with optional attachment"""
+    if not recipient_email:
+        st.error("No email address available.")
+        return False
+    
     try:
-        if st.session_state.get("firebase_configured", False):
-            # Use Firebase Authentication REST API
-            sign_in_url = f"{AUTH_BASE_URL}/accounts:signInWithPassword?key={API_KEY}"
-            payload = {
-                "email": email,
-                "password": password,
-                "returnSecureToken": True
-            }
-            response = requests.post(sign_in_url, json=payload)
-            if response.status_code == 200:
-                user_data = response.json()
-                username = email.split('@')[0]
-                st.session_state.id_token = user_data.get('idToken')
-                return True, username, user_data.get('localId')
-            else:
-                st.error(f"Authentication failed: {response.json().get('error', {}).get('message')}")
-                return False, None, None
-        else:
-            # Use demo authentication
-            if email in demo_db.users and demo_db.users[email]["password"] == password:
-                return True, demo_db.users[email]["username"], demo_db.users[email]["user_id"]
-            return False, None, None
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_SENDER
+        msg['To'] = recipient_email
+        msg['Subject'] = subject
+        
+        msg.attach(MIMEText(body, 'html'))
+        
+        if attachment_path and os.path.exists(attachment_path):
+            with open(attachment_path, 'rb') as f:
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(f.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                'Content-Disposition',
+                f'attachment; filename={os.path.basename(attachment_path)}'
+            )
+            msg.attach(part)
+        
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(msg)
+        
+        return True
     except Exception as e:
-        st.error(f"Authentication error: {e}")
-        return False, None, None
-
-def create_user(email, password):
-    """Create a new user with Firebase or demo DB"""
-    try:
-        if st.session_state.get("firebase_configured", False):
-            # Create user in Firebase Authentication via REST API
-            sign_up_url = f"{AUTH_BASE_URL}/accounts:signUp?key={API_KEY}"
-            payload = {
-                "email": email,
-                "password": password,
-                "returnSecureToken": True
-            }
-            response = requests.post(sign_up_url, json=payload)
-            if response.status_code == 200:
-                user_data = response.json()
-                username = email.split('@')[0]
-                return True, username, user_data.get('localId')
-            else:
-                st.error(f"User creation failed: {response.json().get('error', {}).get('message')}")
-                return False, None, None
-        else:
-            # Create user in demo DB
-            if email in demo_db.users:
-                return False, None, None
-            username = email.split('@')[0]
-            user_id = f"user_{len(demo_db.users) + 1}"
-            demo_db.users[email] = {
-                "password": password,
-                "username": username,
-                "user_id": user_id
-            }
-            return True, username, user_id
-    except Exception as e:
-        st.error(f"User creation error: {e}")
-        return False, None, None
-
-def login_page():
-    """Display the login page"""
-    st.markdown('<h1 class="main-header">Task Management System</h1>', unsafe_allow_html=True)
-    
-    # Create two columns for login and signup
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<h2 class="sub-header">Login</h2>', unsafe_allow_html=True)
-        login_email = st.text_input("Email", key="login_email")
-        login_password = st.text_input("Password", type="password", key="login_password")
-        login_button = st.button("Login")
-        
-        if login_button:
-            if login_email and login_password:
-                success, username, user_id = authenticate_user(login_email, login_password)
-                if success:
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.session_state.user_id = user_id
-                    st.session_state.email = login_email
-                    st.experimental_rerun()
-                else:
-                    st.error("Invalid email or password")
-            else:
-                st.error("Please enter both email and password")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<h2 class="sub-header">Sign Up</h2>', unsafe_allow_html=True)
-        signup_email = st.text_input("Email", key="signup_email")
-        signup_password = st.text_input("Password", type="password", key="signup_password")
-        signup_confirm_password = st.text_input("Confirm Password", type="password", key="signup_confirm_password")
-        signup_button = st.button("Sign Up")
-        
-        if signup_button:
-            if signup_email and signup_password and signup_confirm_password:
-                if not re.match(r"[^@]+@[^@]+\.[^@]+", signup_email):
-                    st.error("Please enter a valid email address")
-                elif signup_password != signup_confirm_password:
-                    st.error("Passwords do not match")
-                elif len(signup_password) < 6:
-                    st.error("Password must be at least 6 characters long")
-                else:
-                    success, username, user_id = create_user(signup_email, signup_password)
-                    if success:
-                        st.success("Account created successfully! Please login.")
-                    else:
-                        st.error("Email already exists or there was an error creating the account")
-            else:
-                st.error("Please fill in all fields")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-def add_task_form():
-    """Form for adding a new task"""
-    st.markdown('<h2 class="sub-header">Create New Task</h2>', unsafe_allow_html=True)
-    
-    with st.form("add_task_form", clear_on_submit=True):
-        title = st.text_input("Task Title", placeholder="Enter task title")
-        description = st.text_area("Description", placeholder="Describe the task in detail")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            status = st.selectbox("Status", ["To Do", "In Progress", "Done"])
-            priority = st.selectbox("Priority", ["Low", "Medium", "High"])
-        
-        with col2:
-            assignee = st.text_input("Assignee", value=st.session_state.username, 
-                                     help="Enter the username of the person assigned to this task")
-            due_date = st.date_input("Due Date", 
-                                   value=datetime.datetime.now() + datetime.timedelta(days=7))
-        
-        submitted = st.form_submit_button("Add Task")
-        
-        if submitted:
-            if title:
-                db = get_db()
-                new_task = {
-                    "title": title,
-                    "description": description,
-                    "status": status,
-                    "priority": priority,
-                    "assignee": assignee,
-                    "due_date": due_date.strftime("%Y-%m-%d"),
-                    "created_at": datetime.datetime.now().strftime("%Y-%m-%d"),
-                    "created_by": st.session_state.username
-                }
-                
-                # Add the task to the database
-                db.collection("tasks").add(new_task)
-                st.success("Task added successfully!")
-                return True
-            else:
-                st.error("Task title is required!")
-                return False
+        st.error(f"Email sending failed: {e}")
         return False
 
-def fetch_tasks():
-    """Fetch all tasks from the database"""
-    db = get_db()
-    tasks_ref = db.collection("tasks").get()
+# Export functions
+def generate_task_report_pdf(tasks, user_info, team_members):
+    """Generate a PDF report of tasks"""
+    pdf = FPDF()
+    pdf.add_page()
     
-    tasks = []
-    for task in tasks_ref.docs:
-        task_data = task.to_dict()
-        task_data["task_id"] = task.id
-        tasks.append(task_data)
+    # Set font
+    pdf.set_font("Arial", "B", 16)
     
-    return tasks
+    # Title
+    pdf.cell(0, 10, "Task Management Report", ln=True, align="C")
+    pdf.ln(5)
+    
+    # Date
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(0, 10, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True)
+    pdf.cell(0, 10, f"Generated by: {user_info.get('name', 'Unknown')}", ln=True)
+    pdf.ln(10)
+    
+    # Summary
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Task Summary", ln=True)
+    pdf.set_font("Arial", "", 12)
+    
+    # Count tasks by status
+    status_counts = {status: 0 for status in STATUS_OPTIONS}
+    for task in tasks:
+        status = task.get('status', 'To Do')
+        status_counts[status] += 1
+    
+    for status, count in status_counts.items():
+        pdf.cell(0, 10, f"{status}: {count} tasks", ln=True)
+    
+    pdf.ln(5)
+    
+    # Tasks details
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Task Details", ln=True)
+    
+    # Headers
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(60, 10, "Task Name", border=1)
+    pdf.cell(30, 10, "Priority", border=1)
+    pdf.cell(30, 10, "Status", border=1)
+    pdf.cell(40, 10, "Assignee", border=1)
+    pdf.cell(30, 10, "Due Date", border=1, ln=True)
+    
+    # Data rows
+    pdf.set_font("Arial", "", 12)
+    for task in tasks:
+        assignee_username = "Unassigned"
+        for member in team_members:
+            if member.get('id') == task.get('assignee'):
+                assignee_username = member.get('username', 'Unknown')
+                break
+        
+        # Ensure text fits in cells
+        task_name = task.get('title', 'Unnamed Task')
+        if len(task_name) > 20:
+            task_name = task_name[:17] + "..."
+        
+        pdf.cell(60, 10, task_name, border=1)
+        pdf.cell(30, 10, task.get('priority', 'Medium'), border=1)
+        pdf.cell(30, 10, task.get('status', 'To Do'), border=1)
+        pdf.cell(40, 10, assignee_username, border=1)
+        due_date = task.get('due_date', '')
+        pdf.cell(30, 10, due_date, border=1, ln=True)
+    
+    # Save PDF
+    report_path = f"task_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    pdf.output(report_path)
+    return report_path
 
-def format_task_table(tasks):
-    """Format tasks for display in a table"""
-    if not tasks:
-        return pd.DataFrame()
+def generate_eod_report(tasks, user_info, team_members):
+    """Generate an HTML EOD report"""
+    today = datetime.now().strftime('%Y-%m-%d')
     
-    # Convert tasks to DataFrame
-    df = pd.DataFrame(tasks)
+    # Filter tasks updated today
+    updated_today = [task for task in tasks if task.get('last_updated', '').startswith(today)]
     
-    # Select and rename columns for display
-    display_columns = [
-        "title", "status", "priority", "assignee", "due_date", "created_at"
-    ]
+    # Count tasks by status
+    status_counts = {status: 0 for status in STATUS_OPTIONS}
+    for task in tasks:
+        status = task.get('status', 'To Do')
+        status_counts[status] += 1
     
-    column_names = {
-        "title": "Task Title",
-        "status": "Status",
-        "priority": "Priority",
-        "assignee": "Assigned To",
-        "due_date": "Due Date",
-        "created_at": "Created On"
-    }
+    # Get tasks due soon
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+    due_soon = [task for task in tasks if task.get('due_date', '') in (today, tomorrow) and task.get('status', '') != 'Done']
     
-    # Make sure all columns exist
-    for col in display_columns:
-        if col not in df.columns:
-            df[col] = ""
+    # Start building HTML
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 800px; margin: 0 auto; padding: 20px; }}
+            h1, h2, h3 {{ color: #3366ff; }}
+            .header {{ background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+            .summary {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
+            .summary-item {{ text-align: center; padding: 10px; background-color: #f8f9fa; border-radius: 5px; width: 22%; }}
+            .summary-value {{ font-size: 24px; font-weight: bold; color: #3366ff; }}
+            .summary-label {{ font-size: 14px; color: #666; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; }}
+            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background-color: #f2f2f2; }}
+            .priority-low {{ background-color: #d4edda; }}
+            .priority-medium {{ background-color: #fff3cd; }}
+            .priority-high {{ background-color: #ffe5d0; }}
+            .priority-critical {{ background-color: #f8d7da; }}
+            .footer {{ margin-top: 30px; font-size: 14px; color: #666; text-align: center; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>EOD Report - {today}</h1>
+                <p>Generated by: {user_info.get('name', 'Unknown')}</p>
+            </div>
+            
+            <h2>Project Status Summary</h2>
+            <div class="summary">
+                <div class="summary-item">
+                    <div class="summary-value">{status_counts['To Do']}</div>
+                    <div class="summary-label">To Do</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value">{status_counts['In Progress']}</div>
+                    <div class="summary-label">In Progress</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value">{status_counts['On Hold']}</div>
+                    <div class="summary-label">On Hold</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-value">{status_counts['Done']}</div>
+                    <div class="summary-label">Done</div>
+                </div>
+            </div>
+    """
     
-    # Create the display dataframe
-    display_df = df[display_columns].rename(columns=column_names)
+    # Today's updates
+    if updated_today:
+        html += """
+            <h2>Today's Updates</h2>
+            <table>
+                <tr>
+                    <th>Task</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Assignee</th>
+                </tr>
+        """
+        
+        for task in updated_today:
+            assignee_username = "Unassigned"
+            for member in team_members:
+                if member.get('id') == task.get('assignee'):
+                    assignee_username = member.get('username', 'Unknown')
+                    break
+            
+            priority_class = f"priority-{task.get('priority', 'Medium').lower()}"
+            
+            html += f"""
+                <tr class="{priority_class}">
+                    <td>{task.get('title', 'Unnamed Task')}</td>
+                    <td>{task.get('status', 'To Do')}</td>
+                    <td>{task.get('priority', 'Medium')}</td>
+                    <td>{assignee_username}</td>
+                </tr>
+            """
+        
+        html += "</table>"
+    else:
+        html += "<h2>Today's Updates</h2><p>No tasks were updated today.</p>"
     
-    return display_df
+    # Due soon
+    if due_soon:
+        html += """
+            <h2>Tasks Due Soon</h2>
+            <table>
+                <tr>
+                    <th>Task</th>
+                    <th>Due Date</th>
+                    <th>Priority</th>
+                    <th>Assignee</th>
+                </tr>
+        """
+        
+        for task in due_soon:
+            assignee_username = "Unassigned"
+            for member in team_members:
+                if member.get('id') == task.get('assignee'):
+                    assignee_username = member.get('username', 'Unknown')
+                    break
+            
+            priority_class = f"priority-{task.get('priority', 'Medium').lower()}"
+            
+            html += f"""
+                <tr class="{priority_class}">
+                    <td>{task.get('title', 'Unnamed Task')}</td>
+                    <td>{task.get('due_date', 'No due date')}</td>
+                    <td>{task.get('priority', 'Medium')}</td>
+                    <td>{assignee_username}</td>
+                </tr>
+            """
+        
+        html += "</table>"
+    else:
+        html += "<h2>Tasks Due Soon</h2><p>No tasks are due soon.</p>"
+    
+    # Close HTML
+    html += """
+            <div class="footer">
+                <p>This is an automated report from the Task Management System.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html
 
-def task_details(task_id):
-    """Display and edit task details"""
-    db = get_db()
+# User management functions
+def extract_username_from_email(email):
+    """Extract username from email address (before @)"""
+    if email and '@' in email:
+        return email.split('@')[0]
+    return "user"
+
+def get_user_info(user_id):
+    """Get user info from database"""
+    if not db:
+        return {"name": "Unknown", "email": "unknown@example.com"}
     
-    # Fetch the task
-    task_ref = db.collection("tasks").document(task_id)
-    task_data = task_ref.get().to_dict()
+    try:
+        user_data = db.child("users").child(user_id).get().val()
+        if user_data:
+            return user_data
+        return {"name": "Unknown", "email": "unknown@example.com"}
+    except Exception as e:
+        st.error(f"Error getting user info: {e}")
+        return {"name": "Unknown", "email": "unknown@example.com"}
+
+def get_team_members(project_id):
+    """Get all team members for a project"""
+    if not db:
+        return []
     
-    if not task_data:
-        st.error("Task not found!")
+    try:
+        members = db.child("project_members").child(project_id).get().val()
+        if not members:
+            return []
+        
+        team = []
+        for member_id, role in members.items():
+            user_data = get_user_info(member_id)
+            team.append({
+                "id": member_id,
+                "name": user_data.get("name", "Unknown"),
+                "email": user_data.get("email", "unknown@example.com"),
+                "username": extract_username_from_email(user_data.get("email", "")),
+                "role": role
+            })
+        return team
+    except Exception as e:
+        st.error(f"Error getting team members: {e}")
+        return []
+
+def get_user_projects(user_id):
+    """Get projects where user is a member"""
+    if not db:
+        return []
+    
+    try:
+        all_projects = db.child("projects").get().val()
+        if not all_projects:
+            return []
+        
+        user_projects = []
+        for project_id, project_data in all_projects.items():
+            members = db.child("project_members").child(project_id).get().val()
+            if members and user_id in members:
+                project_data["id"] = project_id
+                user_projects.append(project_data)
+        
+        return user_projects
+    except Exception as e:
+        st.error(f"Error getting user projects: {e}")
+        return []
+
+def get_project_tasks(project_id):
+    """Get all tasks for a project"""
+    if not db:
+        return []
+    
+    try:
+        tasks = db.child("tasks").child(project_id).get().val()
+        if not tasks:
+            return []
+        
+        task_list = []
+        for task_id, task_data in tasks.items():
+            task_data["id"] = task_id
+            task_list.append(task_data)
+        
+        # Sort tasks by priority and due date
+        task_list.sort(key=lambda x: (
+            PRIORITY_OPTIONS.index(x.get("priority", "Medium")),
+            x.get("due_date", "9999-12-31")
+        ))
+        
+        return task_list
+    except Exception as e:
+        st.error(f"Error getting project tasks: {e}")
+        return []
+
+# Firebase login
+def login():
+    """Handle user login and authentication"""
+    if "user" not in st.session_state or not st.session_state.user:
+        st.session_state.user = None
+        
+        with st.container():
+            st.markdown('<h1 class="main-header">Task Management System</h1>', unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            
+            with col2:
+                st.markdown('<div class="form-container">', unsafe_allow_html=True)
+                login_option = st.selectbox("Choose login method", ["Email/Password", "Sign Up"])
+                
+                if login_option == "Email/Password":
+                    email = st.text_input("Email")
+                    password = st.text_input("Password", type="password")
+                    
+                    if st.button("Login", key="login_btn"):
+                        try:
+                            user = auth.sign_in_with_email_and_password(email, password)
+                            st.session_state.user = user
+                            st.session_state.user_id = user['localId']
+                            
+                            # Get user info or create if new
+                            user_info = get_user_info(user['localId'])
+                            if not user_info or user_info.get('name') == "Unknown":
+                                username = extract_username_from_email(email)
+                                user_info = {
+                                    "name": username.capitalize(),
+                                    "email": email,
+                                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                }
+                                db.child("users").child(user['localId']).set(user_info)
+                            
+                            st.session_state.user_info = user_info
+                            st.success("Logged in successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Login failed: {e}")
+                
+                elif login_option == "Sign Up":
+                    email = st.text_input("Email")
+                    password = st.text_input("Password", type="password")
+                    confirm_password = st.text_input("Confirm Password", type="password")
+                    
+                    if st.button("Sign Up", key="signup_btn"):
+                        if password != confirm_password:
+                            st.error("Passwords do not match")
+                        elif len(password) < 6:
+                            st.error("Password must be at least 6 characters")
+                        else:
+                            try:
+                                user = auth.create_user_with_email_and_password(email, password)
+                                st.session_state.user = user
+                                st.session_state.user_id = user['localId']
+                                
+                                # Create user in database
+                                username = extract_username_from_email(email)
+                                user_info = {
+                                    "name": username.capitalize(),
+                                    "email": email,
+                                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                }
+                                db.child("users").child(user['localId']).set(user_info)
+                                st.session_state.user_info = user_info
+                                
+                                st.success("Account created and logged in!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Sign up failed: {e}")
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Footer
+            st.markdown('<div class="footer">Task Management System © 2025</div>', unsafe_allow_html=True)
+        
+        return False
+    return True
+
+# Task management functions
+def create_task(project_id, task_data):
+    """Create a new task in the database"""
+    if not db:
+        return False
+    
+    try:
+        task_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        task_data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        task_id = db.child("tasks").child(project_id).push(task_data)
+        return True
+    except Exception as e:
+        st.error(f"Error creating task: {e}")
+        return False
+
+def update_task(project_id, task_id, task_data):
+    """Update an existing task"""
+    if not db:
+        return False
+    
+    try:
+        task_data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.child("tasks").child(project_id).child(task_id).update(task_data)
+        return True
+    except Exception as e:
+        st.error(f"Error updating task: {e}")
+        return False
+
+def delete_task(project_id, task_id):
+    """Delete a task"""
+    if not db:
+        return False
+    
+    try:
+        db.child("tasks").child(project_id).child(task_id).remove()
+        return True
+    except Exception as e:
+        st.error(f"Error deleting task: {e}")
+        return False
+
+def create_project(project_data, user_id):
+    """Create a new project and add creator as admin"""
+    if not db:
+        return None
+    
+    try:
+        project_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        project_data["created_by"] = user_id
+        
+        project_id = db.child("projects").push(project_data)
+        
+        # Add creator as admin
+        db.child("project_members").child(project_id["name"]).child(user_id).set("admin")
+        
+        return project_id["name"]
+    except Exception as e:
+        st.error(f"Error creating project: {e}")
+        return None
+
+def add_project_member(project_id, email, role="member"):
+    """Add a team member to a project by email"""
+    if not db:
+        return False
+    
+    try:
+        # Find user by email
+        users = db.child("users").get().val()
+        if not users:
+            return False
+        
+        user_id = None
+        for uid, user_data in users.items():
+            if user_data.get("email") == email:
+                user_id = uid
+                break
+        
+        if not user_id:
+            return False
+        
+        # Add user to project
+        db.child("project_members").child(project_id).child(user_id).set(role)
+        return True
+    except Exception as e:
+        st.error(f"Error adding project member: {e}")
+        return False
+
+def remove_project_member(project_id, user_id):
+    """Remove a team member from a project"""
+    if not db:
+        return False
+    
+    try:
+        db.child("project_members").child(project_id).child(user_id).remove()
+        return True
+    except Exception as e:
+        st.error(f"Error removing project member: {e}")
+        return False
+
+# Session state initialization
+if "active_project" not in st.session_state:
+    st.session_state.active_project = None
+if "active_task" not in st.session_state:
+    st.session_state.active_task = None
+if "show_create_task" not in st.session_state:
+    st.session_state.show_create_task = False
+if "show_create_project" not in st.session_state:
+    st.session_state.show_create_project = False
+if "filter_status" not in st.session_state:
+    st.session_state.filter_status = "All"
+if "filter_priority" not in st.session_state:
+    st.session_state.filter_priority = "All"
+if "filter_assignee" not in st.session_state:
+    st.session_state.filter_assignee = "All"
+
+# Main app
+# Main app
+def main():
+    load_css()
+    
+    if not login():
         return
     
-    st.markdown(f'<h2 class="sub-header">Task Details</h2>', unsafe_allow_html=True)
+    # Get user information
+    user_id = st.session_state.user_id
+    user_info = st.session_state.user_info
     
-    with st.form("edit_task_form"):
-        title = st.text_input("Task Title", value=task_data.get("title", ""))
-        description = st.text_area("Description", value=task_data.get("description", ""))
+    # App header
+    st.markdown('<h1 class="main-header">Task Management System</h1>', unsafe_allow_html=True)
+    
+    # Sidebar for navigation
+    with st.sidebar:
+        st.markdown(f"""
+        <div class="profile-container">
+            <div class="profile-name">{user_info.get('name', 'User')}</div>
+            <div class="profile-email">{user_info.get('email', '')}</div>
+        </div>
+        """, unsafe_allow_html=True)
         
-        col1, col2 = st.columns(2)
-        with col1:
-            status = st.selectbox("Status", 
-                                ["To Do", "In Progress", "Done"], 
-                                index=["To Do", "In Progress", "Done"].index(task_data.get("status", "To Do")))
-            priority = st.selectbox("Priority", 
-                                 ["Low", "Medium", "High"],
-                                 index=["Low", "Medium", "High"].index(task_data.get("priority", "Medium")))
+        nav_selection = st.radio("Navigation", 
+                                ["Dashboard", "Projects", "Tasks", "Team", "Reports", "Settings"])
         
-        with col2:
-            assignee = st.text_input("Assignee", value=task_data.get("assignee", st.session_state.username))
-            due_date = st.date_input("Due Date", 
-                                  value=datetime.datetime.strptime(task_data.get("due_date", datetime.datetime.now().strftime("%Y-%m-%d")), "%Y-%m-%d"))
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            update_button = st.form_submit_button("Update Task")
-        with col2:
-            delete_button = st.form_submit_button("Delete Task", type="secondary")
-        
-        if update_button:
-            updated_task = {
-                "title": title,
-                "description": description,
-                "status": status,
-                "priority": priority,
-                "assignee": assignee,
-                "due_date": due_date.strftime("%Y-%m-%d"),
-                "last_updated": datetime.datetime.now().strftime("%Y-%m-%d")
-            }
-            
-            # Update the task in the database
-            task_ref.update(updated_task)
-            st.success("Task updated successfully!")
-            st.session_state.selected_task = None
-            st.experimental_rerun()
-        
-        if delete_button:
-            task_ref.delete()
-            st.success("Task deleted successfully!")
-            st.session_state.selected_task = None
-            st.experimental_rerun()
-
-def generate_eod_report():
-    """Generate an End of Day report"""
-    tasks = fetch_tasks()
-    
-    # Filter tasks for the current user
-    user_tasks = [task for task in tasks if task.get("assignee") == st.session_state.username]
-    
-    # Group tasks by status
-    tasks_by_status = {
-        "To Do": [task for task in user_tasks if task.get("status") == "To Do"],
-        "In Progress": [task for task in user_tasks if task.get("status") == "In Progress"],
-        "Done": [task for task in user_tasks if task.get("status") == "Done"]
-    }
-    
-    # Create the report
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    report = f"""
-# End of Day Report - {today}
-## User: {st.session_state.username}
-
-### Summary
-- Total tasks: {len(user_tasks)}
-- To Do: {len(tasks_by_status['To Do'])}
-- In Progress: {len(tasks_by_status['In Progress'])}
-- Done: {len(tasks_by_status['Done'])}
-
-### Tasks Done Today
-"""
-    
-    if tasks_by_status["Done"]:
-        for task in tasks_by_status["Done"]:
-            report += f"- {task.get('title')}\n"
-    else:
-        report += "- No tasks completed today\n"
-    
-    report += "\n### Tasks In Progress\n"
-    
-    if tasks_by_status["In Progress"]:
-        for task in tasks_by_status["In Progress"]:
-            report += f"- {task.get('title')} (Due: {task.get('due_date')})\n"
-    else:
-        report += "- No tasks in progress\n"
-    
-    report += "\n### Upcoming Tasks\n"
-    
-    if tasks_by_status["To Do"]:
-        for task in tasks_by_status["To Do"]:
-            report += f"- {task.get('title')} (Due: {task.get('due_date')})\n"
-    else:
-        report += "- No upcoming tasks\n"
-    
-    return report
-
-def send_email(to_email, subject, body):
-    """Send email with the EOD report (for demo purposes)"""
-    if firebase_admin._apps:
-        # In a real app, you would use an email service
-        st.info("In a production app, this would send an email using a service like SendGrid or SMTP")
-        st.code(f"""
-To: {to_email}
-Subject: {subject}
-        
-{body}
-        """)
-        return True
-    else:
-        # Show demo email
-        st.info("Demo Mode: Email would be sent with the following content")
-        st.markdown(body)
-        return True
-
-def dashboard():
-    """Display the main dashboard with task management features"""
-    # Display header with logout option
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown(f'<h1 class="main-header">Task Management Dashboard</h1>', unsafe_allow_html=True)
-    with col2:
-        st.write(f"Logged in as: **{st.session_state.username}**")
         if st.button("Logout"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.experimental_rerun()
+            st.session_state.user = None
+            st.session_state.user_id = None
+            st.session_state.user_info = None
+            st.session_state.active_project = None
+            st.rerun()
     
-    # Create tabs for different sections
-    tab1, tab2, tab3, tab4 = st.tabs(["Dashboard", "Tasks", "Create Task", "EOD Report"])
+    # Navigation handling
+    if nav_selection == "Dashboard":
+        show_dashboard(user_id, user_info)
+    elif nav_selection == "Projects":
+        show_projects(user_id, user_info)
+    elif nav_selection == "Tasks":
+        show_tasks(user_id, user_info)
+    elif nav_selection == "Team":
+        show_team(user_id, user_info)
+    elif nav_selection == "Reports":
+        show_reports(user_id, user_info)
+    elif nav_selection == "Settings":
+        show_settings(user_id, user_info)
     
-    with tab1:
-        # Dashboard overview
-        st.markdown('<h2 class="sub-header">Project Overview</h2>', unsafe_allow_html=True)
-        
-        # Fetch tasks for metrics
-        tasks = fetch_tasks()
-        
-        # Calculate metrics
-        total_tasks = len(tasks)
-        tasks_todo = len([task for task in tasks if task.get("status") == "To Do"])
-        tasks_in_progress = len([task for task in tasks if task.get("status") == "In Progress"])
-        tasks_done = len([task for task in tasks if task.get("status") == "Done"])
-        
-        # Display metrics in a nice layout
-        st.markdown('<div class="metric-container">', unsafe_allow_html=True)
-        
-        # Total Tasks
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">Total Tasks</div>
-            <div class="metric-value">{total_tasks}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # To Do
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">To Do</div>
-            <div class="metric-value">{tasks_todo}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # In Progress
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">In Progress</div>
-            <div class="metric-value">{tasks_in_progress}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Done
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">Done</div>
-            <div class="metric-value">{tasks_done}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Recent tasks section
-        st.markdown('<h3 class="sub-header">Recent Tasks</h3>', unsafe_allow_html=True)
-        
-        if tasks:
-            # Sort tasks by creation date (most recent first)
-            sorted_tasks = sorted(tasks, key=lambda x: x.get("created_at", ""), reverse=True)
-            recent_tasks = sorted_tasks[:5]  # Get the 5 most recent tasks
-            
-            for task in recent_tasks:
-                with st.container():
-                    st.markdown(f"""
-                    <div class="card">
-                        <h4>{task.get('title')}</h4>
-                        <p>{task.get('description', '')[:100]}{'...' if len(task.get('description', '')) > 100 else ''}</p>
-                        <p>
-                            <span class="status-{task.get('status', '').lower().replace(' ', '-')}">
-                                {task.get('status', '')}
-                            </span>
-                            &nbsp;•&nbsp;
-                            <span class="priority-{task.get('priority', '').lower()}">
-                                {task.get('priority', '')} Priority
-                            </span>
-                            &nbsp;•&nbsp;
-                            Due: {task.get('due_date', '')}
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-        else:
-            st.info("No tasks found. Create some tasks to see them here!")
-    
-    with tab2:
-        # Task list and management
-        st.markdown('<h2 class="sub-header">Task List</h2>', unsafe_allow_html=True)
-        
-        # Add filters
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            status_filter = st.selectbox("Filter by Status", ["All", "To Do", "In Progress", "Done"])
-        with col2:
-            priority_filter = st.selectbox("Filter by Priority", ["All", "Low", "Medium", "High"])
-        with col3:
-            assignee_filter = st.text_input("Filter by Assignee", value="")
-        
-        # Fetch and display tasks
-        tasks = fetch_tasks()
-        
-        # Apply filters
-        if status_filter != "All":
-            tasks = [task for task in tasks if task.get("status") == status_filter]
-        
-        if priority_filter != "All":
-            tasks = [task for task in tasks if task.get("priority") == priority_filter]
-        
-        if assignee_filter:
-            tasks = [task for task in tasks if assignee_filter.lower() in task.get("assignee", "").lower()]
-        
-        # Display tasks in a table
-        if tasks:
-            task_df = format_task_table(tasks)
-            st.dataframe(task_df, use_container_width=True)
-            
-            # Add a way to select tasks for detailed view
-            task_titles = [task.get("title") for task in tasks]
-            task_ids = [task.get("task_id") for task in tasks]
-            
-            selected_task_title = st.selectbox("Select a task to view/edit details", 
-                                             ["Select a task..."] + task_titles)
-            
-            if selected_task_title != "Select a task...":
-                selected_index = task_titles.index(selected_task_title)
-                selected_task_id = task_ids[selected_index]
-                st.session_state.selected_task = selected_task_id
-                task_details(selected_task_id)
-        else:
-            st.info("No tasks found with the current filters.")
-    
-    with tab3:
-        # Create new task form
-        task_added = add_task_form()
-        if task_added:
-            # Clear form after successful submission
-            st.experimental_rerun()
-    
-    with tab4:
-        # EOD Report generation
-        st.markdown('<h2 class="sub-header">End of Day Report</h2>', unsafe_allow_html=True)
-        
-        # Generate the report
-        eod_report = generate_eod_report()
-        
-        # Display preview of the report
-        st.markdown(eod_report)
-        
-        # Add email option
-        st.markdown('<h3 class="sub-header">Send Report by Email</h3>', unsafe_allow_html=True)
-        
-        recipient_email = st.text_input("Recipient Email", value=st.session_state.email)
-        subject = st.text_input("Email Subject", value=f"EOD Report - {datetime.datetime.now().strftime('%Y-%m-%d')}")
-        
-        if st.button("Send EOD Report"):
-            success = send_email(recipient_email, subject, eod_report)
-            if success:
-                st.success("EOD report sent successfully!")
+    # Footer
+    st.markdown('<div class="footer">Task Management System © 2025</div>', unsafe_allow_html=True)
 
-def main():
-    # Initialize session state variables if they don't exist
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = False
-    
-    if "selected_task" not in st.session_state:
-        st.session_state.selected_task = None
-    
-    # Display the appropriate page based on login status
-    if not st.session_state.logged_in:
-        login_page()
-    else:
-        dashboard()
-
+# Run the app
 if __name__ == "__main__":
     main()
