@@ -1,6 +1,6 @@
 streamlit
 pandas
-pyrebase4==4.8.0
+pyrebase
 fpdf
-plotly 
-email-validator
+plotly
+smtplib
