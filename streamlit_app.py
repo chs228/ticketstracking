@@ -5,7 +5,7 @@ from datetime import datetime
 import os
 
 # Firebase Configuration (Use environment variables on Streamlit Cloud)
- firebaseConfig = {
+firebaseConfig = {
   apiKey: "AIzaSyBTsa0pgK0R6aDOxPe_c_MBdKR4XaHPGGA",
   authDomain: "tracking-c62bb.firebaseapp.com",
   databaseURL: "https://tracking-c62bb-default-rtdb.firebaseio.com",
