@@ -15,8 +15,6 @@ import pyrebase
 import uuid
 import json
 from fpdf import FPDF
-import plotly.express as px
-import plotly.graph_objects as go
 
 # Firebase configuration
 firebase_config = {
@@ -648,7 +646,7 @@ def login():
                         if password != confirm_password:
                             st.error("Passwords do not match")
                         elif len(password) < 6:
-                            st.error("Password must be at6 characters")
+                            st.error("Password must be at least 6 characters")
                         else:
                             try:
                                 user = auth.create_user_with_email_and_password(email, password)
@@ -735,7 +733,7 @@ def add_project_member(project_id, email, role="member"):
         return False
     
     try:
-        users = db.child("users").get().val()
+        users = db.child("  users").get().val()
         if not users:
             return False
         
@@ -855,7 +853,7 @@ def show_projects(user_id, user_info):
                     st.error("Failed to create project.")
 
 def show_tasks(user_id, user_info):
-    st savais('<h2 class="tab-subheader">Tasks</h2>', unsafe_allow_html=True)
+    st.markdown('<h2 class="tab-subheader">Tasks</h2>', unsafe_allow_html=True)
     
     if not st.session_state.active_project:
         st.warning("Please select a project from the Projects tab.")
@@ -1019,17 +1017,17 @@ def show_reports(user_id, user_info):
         else:
             st.error("Failed to send EOD Report.")
     
-    # Task status chart
+    # Task status chart (using Streamlit bar chart)
+    st.markdown("### Task Status Distribution")
     status_counts = {status: 0 for status in STATUS_OPTIONS}
     for task in tasks:
         status_counts[task.get('status', 'To Do')] += 1
     
-    fig = px.pie(
-        names=list(status_counts.keys()),
-        values=list(status_counts.values()),
-        title="Task Status Distribution"
-    )
-    st.plotly_chart(fig)
+    df = pd.DataFrame({
+        "Status": list(status_counts.keys()),
+        "Count": list(status_counts.values())
+    })
+    st.bar_chart(df.set_index("Status")["Count"])
 
 def show_settings(user_id, user_info):
     st.markdown('<h2 class="tab-subheader">Settings</h2>', unsafe_allow_html=True)
