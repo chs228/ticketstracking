@@ -5,6 +5,19 @@ from datetime import datetime
 import json
 
 # Firebase Configuration (Replace with your Firebase project's config)
+
+
+# import streamlit as st
+# import pyrebase
+# import pandas as pd
+# from datetime import datetime
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Firebase Configuration (Replace with your Firebase project's config)
 firebaseConfig = {
   apiKey: "AIzaSyBTsa0pgK0R6aDOxPe_c_MBdKR4XaHPGGA",
   authDomain: "tracking-c62bb.firebaseapp.com",
@@ -14,14 +27,15 @@ firebaseConfig = {
   messagingSenderId: "977902624059",
   appId: "1:977902624059:web:165e120df5463bde332b1e",
   measurementId: "G-PNHDJF45Z6"}
-
 # Initialize Firebase
 try:
     firebase = pyrebase.initialize_app(firebaseConfig)
     auth = firebase.auth()
     db = firebase.database()
+    logger.info("Firebase initialized successfully")
 except Exception as e:
     st.error(f"Failed to initialize Firebase: {str(e)}")
+    logger.error(f"Firebase initialization failed: {str(e)}")
     st.stop()
 
 # Streamlit App
@@ -39,77 +53,66 @@ def main():
     # Authentication
     if not st.session_state.user:
         st.title("Task & Issue Management System")
-        if st.button("Sign in with Google"):
-            try:
-                # Streamlit doesn't support popups, so use a redirect flow simulation
-                st.session_state.sign_in_pending = True
-                st.write("Please sign in via the popup in a new browser tab.")
-                # Open a new tab for Google Sign-In (manual flow)
-                st.markdown(
-                    """
-                    <script>
-                        window.open('https://accounts.google.com/', '_blank');
-                    </script>
-                    """,
-                    unsafe_allow_html=True
-                )
-                st.session_state.sign_in_message = "After signing in, enter your email and click 'Continue' below."
-            except Exception as e:
-                st.error(f"Sign-in initiation failed: {str(e)}")
-
-        if 'sign_in_pending' in st.session_state and st.session_state.sign_in_pending:
-            email = st.text_input("Enter your Google email")
-            if st.button("Continue"):
-                try:
-                    # Simulate sign-in by verifying email (Pyrebase doesn't support direct Google popup in Streamlit)
-                    user = auth.sign_in_with_email_and_password(email, "temporary_password")  # Placeholder; replace with Google token if using custom backend
-                    st.session_state.user = user
-                    username = db.child("users").child(user['localId']).child("username").get(user['idToken']).val()
-                    if not username:
-                        st.session_state.temp_uid = user['localId']
-                        st.session_state.temp_email = user['email']
-                        st.session_state.show_username_form = True
-                    else:
-                        st.session_state.username = username
-                        st.session_state.sign_in_pending = False
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Sign-in failed: {str(e)}. Ensure Google Sign-In is enabled and try again.")
-                    st.session_state.sign_in_pending = False
-                    st.rerun()
-
-        if 'show_username_form' in st.session_state and st.session_state.show_username_form:
-            st.subheader("Create Your Username")
-            username = st.text_input("Enter a unique username")
-            if st.button("Save Username"):
+        auth_option = st.radio("Choose an option", ["Sign In", "Sign Up"])
+        
+        if auth_option == "Sign Up":
+            st.subheader("Create Account")
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            username = st.text_input("Username")
+            if st.button("Sign Up"):
                 try:
                     users = db.child("users").get().val()
-                    if users and any(user_data['username'] == username for user_data in users.values()):
+                    if users and any(user_data.get('username') == username for user_data in users.values()):
                         st.error("Username already taken. Please choose another.")
+                        logger.warning(f"Username {username} already taken")
                     else:
-                        db.child("users").child(st.session_state.temp_uid).set({
-                            "email": st.session_state.temp_email,
+                        user = auth.create_user_with_email_and_password(email, password)
+                        db.child("users").child(user['localId']).set({
+                            "email": email,
                             "username": username
-                        }, st.session_state.user['idToken'])
+                        })
+                        st.session_state.user = user
                         st.session_state.username = username
-                        st.session_state.show_username_form = False
-                        st.session_state.sign_in_pending = False
+                        logger.info(f"User signed up: {email}")
                         st.rerun()
                 except Exception as e:
-                    st.error(f"Error saving username: {str(e)}")
+                    st.error(f"Sign-up failed: {str(e)}")
+                    logger.error(f"Sign-up failed: {str(e)}")
+        
+        else:
+            st.subheader("Sign In")
+            email = st.text_input("Email")
+            password = st.text_input("Password", type="password")
+            if st.button("Sign In"):
+                try:
+                    user = auth.sign_in_with_email_and_password(email, password)
+                    username = db.child("users").child(user['localId']).child("username").get().val()
+                    if username:
+                        st.session_state.user = user
+                        st.session_state.username = username
+                        logger.info(f"User signed in: {email}")
+                        st.rerun()
+                    else:
+                        st.error("User not found. Please sign up.")
+                        logger.warning(f"User not found: {email}")
+                except Exception as e:
+                    st.error(f"Sign-in failed: {str(e)}")
+                    logger.error(f"Sign-in failed: {str(e)}")
         return
 
     # Main App
     st.sidebar.title(f"Welcome, {st.session_state.username}")
     if st.sidebar.button("Sign Out"):
         try:
-            auth.current_user = None
             st.session_state.user = None
             st.session_state.username = None
             st.session_state.project_id = None
+            logger.info("User signed out")
             st.rerun()
         except Exception as e:
             st.error(f"Sign-out failed: {str(e)}")
+            logger.error(f"Sign-out failed: {str(e)}")
 
     section = st.sidebar.radio("Menu", ["Projects", "Tasks", "Issues", "Tickets", "EOD Report"])
 
@@ -125,18 +128,23 @@ def main():
                         "created_at": datetime.now().isoformat()
                     }, st.session_state.user['idToken'])
                     st.success("Project created successfully!")
+                    logger.info(f"Project created: {project_name}")
                 except Exception as e:
                     st.error(f"Error creating project: {str(e)}")
+                    logger.error(f"Error creating project: {str(e)}")
             else:
                 st.error("Project name cannot be empty.")
+                logger.warning("Project name empty")
 
         try:
             projects = db.child("projects").get(st.session_state.user['idToken']).val()
             project_options = {data['name']: key for key, data in projects.items()} if projects else {}
             selected_project = st.selectbox("Select Project", [""] + list(project_options.keys()))
             st.session_state.project_id = project_options.get(selected_project)
+            logger.info(f"Projects loaded: {len(project_options)}")
         except Exception as e:
             st.error(f"Error loading projects: {str(e)}")
+            logger.error(f"Error loading projects: {str(e)}")
             project_options = {}
 
     elif section in ["Tasks", "Issues", "Tickets"]:
@@ -144,6 +152,7 @@ def main():
         st.title(section)
         if not st.session_state.project_id:
             st.warning("Please select a project from the Projects section.")
+            logger.warning("No project selected")
             return
 
         st.subheader(f"Create New {section[:-1]}")
@@ -156,6 +165,7 @@ def main():
                 user_emails = [data['email'] for data in users.values()] if users else []
             except Exception as e:
                 st.error(f"Error loading users: {str(e)}")
+                logger.error(f"Error loading users: {str(e)}")
                 user_emails = []
             assignee = st.selectbox("Assignee", [""] + user_emails, key=f"{table}_assignee")
             submitted = st.form_submit_button("Add")
@@ -172,10 +182,13 @@ def main():
                         "updated_at": datetime.now().isoformat()
                     }, st.session_state.user['idToken'])
                     st.success(f"{section[:-1]} created successfully!")
+                    logger.info(f"{section[:-1]} created: {title}")
                 except Exception as e:
                     st.error(f"Error creating {section[:-1].lower()}: {str(e)}")
+                    logger.error(f"Error creating {section[:-1].lower()}: {str(e)}")
             elif submitted:
                 st.error("Title is required.")
+                logger.warning(f"{section[:-1]} creation failed: Title required")
 
         st.subheader(f"{section} List")
         try:
@@ -184,8 +197,10 @@ def main():
                 (key, data) for key, data in items.items()
                 if data.get('project_id') == st.session_state.project_id
             ] if items else []
+            logger.info(f"{section} loaded: {len(item_list)}")
         except Exception as e:
             st.error(f"Error loading {table}: {str(e)}")
+            logger.error(f"Error loading {table}: {str(e)}")
             item_list = []
 
         if not item_list:
@@ -210,9 +225,11 @@ def main():
                         if st.button("Delete", key=f"delete_{table}_{row['ID']}"):
                             try:
                                 db.child(table).child(row['ID']).remove(st.session_state.user['idToken'])
+                                logger.info(f"{section[:-1]} deleted: {row['Title']}")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error deleting {section[:-1].lower()}: {str(e)}")
+                                logger.error(f"Error deleting {section[:-1].lower()}: {str(e)}")
 
                     if st.session_state.get(f"edit_{table}_{row['ID']}"):
                         with st.form(f"edit_{table}_{row['ID']}_form"):
@@ -242,9 +259,11 @@ def main():
                                             "updated_at": datetime.now().isoformat()
                                         }, st.session_state.user['idToken'])
                                         st.session_state[f"edit_{table}_{row['ID']}"] = False
+                                        logger.info(f"{section[:-1]} updated: {new_title}")
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Error updating {section[:-1].lower()}: {str(e)}")
+                                        logger.error(f"Error updating {section[:-1].lower()}: {str(e)}")
                             with col_cancel:
                                 if st.form_submit_button("Cancel"):
                                     st.session_state[f"edit_{table}_{row['ID']}"] = False
@@ -254,6 +273,7 @@ def main():
         st.title("End of Day Report")
         if not st.session_state.project_id:
             st.warning("Please select a project from the Projects section.")
+            logger.warning("No project selected for EOD report")
             return
         if st.button("Generate EOD Report"):
             try:
@@ -275,8 +295,10 @@ def main():
                 st.session_state.eod_report = report
                 st.text_area("EOD Report", report, height=300, disabled=True)
                 st.download_button("Download Report", report, "eod_report.txt")
+                logger.info("EOD report generated")
             except Exception as e:
                 st.error(f"Error generating EOD report: {str(e)}")
+                logger.error(f"Error generating EOD report: {str(e)}")
 
 if __name__ == "__main__":
     main()
