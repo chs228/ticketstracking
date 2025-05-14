@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import uuid
 import re
-import pyrebase
+import requests
 
 # Firebase configuration
 firebase_config = {
@@ -23,6 +23,10 @@ firebase_config = {
     "appId": "1:26443880227:web:c0f5e7f9d325497e9e1e96",
     "measurementId": "G-J1QMLJ1MHJ"
 }
+
+# Firebase REST API endpoints
+AUTH_BASE_URL = "https://identitytoolkit.googleapis.com/v1"
+API_KEY = firebase_config["apiKey"]
 
 # Initialize Firebase if not already initialized
 if not firebase_admin._apps:
@@ -39,12 +43,6 @@ if not firebase_admin._apps:
             cred_obj = credentials.Certificate(cred)
         
         firebase_admin.initialize_app(cred_obj)
-        
-        # Initialize Pyrebase for authentication (Firebase Admin SDK doesn't support email/password auth directly)
-        firebase = pyrebase.initialize_app(firebase_config)
-        auth_instance = firebase.auth()
-        db_instance = firebase.database()
-        
         st.session_state.firebase_configured = True
     except Exception as e:
         st.warning(f"Running in demo mode: {str(e)}")
@@ -328,10 +326,22 @@ def authenticate_user(email, password):
     """Authenticate user with Firebase or demo DB"""
     try:
         if st.session_state.get("firebase_configured", False):
-            # Use Firebase Authentication via Pyrebase
-            user = auth_instance.sign_in_with_email_and_password(email, password)
-            username = email.split('@')[0]
-            return True, username, user['localId']
+            # Use Firebase Authentication REST API
+            sign_in_url = f"{AUTH_BASE_URL}/accounts:signInWithPassword?key={API_KEY}"
+            payload = {
+                "email": email,
+                "password": password,
+                "returnSecureToken": True
+            }
+            response = requests.post(sign_in_url, json=payload)
+            if response.status_code == 200:
+                user_data = response.json()
+                username = email.split('@')[0]
+                st.session_state.id_token = user_data.get('idToken')
+                return True, username, user_data.get('localId')
+            else:
+                st.error(f"Authentication failed: {response.json().get('error', {}).get('message')}")
+                return False, None, None
         else:
             # Use demo authentication
             if email in demo_db.users and demo_db.users[email]["password"] == password:
@@ -345,10 +355,21 @@ def create_user(email, password):
     """Create a new user with Firebase or demo DB"""
     try:
         if st.session_state.get("firebase_configured", False):
-            # Create user in Firebase Authentication via Pyrebase
-            user = auth_instance.create_user_with_email_and_password(email, password)
-            username = email.split('@')[0]
-            return True, username, user['localId']
+            # Create user in Firebase Authentication via REST API
+            sign_up_url = f"{AUTH_BASE_URL}/accounts:signUp?key={API_KEY}"
+            payload = {
+                "email": email,
+                "password": password,
+                "returnSecureToken": True
+            }
+            response = requests.post(sign_up_url, json=payload)
+            if response.status_code == 200:
+                user_data = response.json()
+                username = email.split('@')[0]
+                return True, username, user_data.get('localId')
+            else:
+                st.error(f"User creation failed: {response.json().get('error', {}).get('message')}")
+                return False, None, None
         else:
             # Create user in demo DB
             if email in demo_db.users:
