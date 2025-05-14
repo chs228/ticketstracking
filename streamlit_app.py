@@ -2,22 +2,15 @@ import streamlit as st
 import pyrebase
 import pandas as pd
 from datetime import datetime
-import json
-
-# Firebase Configuration (Replace with your Firebase project's config)
-
-
-# import streamlit as st
-# import pyrebase
-# import pandas as pd
-# from datetime import datetime
 import logging
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Firebase Configuration (Replace with your Firebase project's config)
+# Firebase Configuration (Use environment variables on Streamlit Cloud)
+firebaseConfig = {
 firebaseConfig = {
   apiKey: "AIzaSyBTsa0pgK0R6aDOxPe_c_MBdKR4XaHPGGA",
   authDomain: "tracking-c62bb.firebaseapp.com",
@@ -26,7 +19,8 @@ firebaseConfig = {
   storageBucket: "tracking-c62bb.firebasestorage.app",
   messagingSenderId: "977902624059",
   appId: "1:977902624059:web:165e120df5463bde332b1e",
-  measurementId: "G-PNHDJF45Z6"}
+  measurementId: "G-PNHDJF45Z6"}}
+
 # Initialize Firebase
 try:
     firebase = pyrebase.initialize_app(firebaseConfig)
@@ -71,7 +65,7 @@ def main():
                         db.child("users").child(user['localId']).set({
                             "email": email,
                             "username": username
-                        })
+                        }, user['idToken'])
                         st.session_state.user = user
                         st.session_state.username = username
                         logger.info(f"User signed up: {email}")
@@ -87,7 +81,7 @@ def main():
             if st.button("Sign In"):
                 try:
                     user = auth.sign_in_with_email_and_password(email, password)
-                    username = db.child("users").child(user['localId']).child("username").get().val()
+                    username = db.child("users").child(user['localId']).child("username").get(user['idToken']).val()
                     if username:
                         st.session_state.user = user
                         st.session_state.username = username
@@ -251,7 +245,7 @@ def main():
                             with col_save:
                                 if st.form_submit_button("Save"):
                                     try:
-                                        db.child(table).child(row['ID']).update({
+                                        db.child(table).child(row['IDéries').update({
                                             "title": new_title,
                                             "description": new_description,
                                             "status": new_status.lower(),
