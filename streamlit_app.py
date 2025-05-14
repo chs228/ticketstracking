@@ -10,24 +10,45 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import uuid
 import re
+import pyrebase
+
+# Firebase configuration
+firebase_config = {
+    "apiKey": "AIzaSyAN9WM1cE-2Hmy6vuq3Bs-0EWbGOFObCAY",
+    "authDomain": "placements-e85b2.firebaseapp.com",
+    "databaseURL": "https://placements-e85b2-default-rtdb.firebaseio.com",
+    "projectId": "placements-e85b2",
+    "storageBucket": "placements-e85b2.firebasestorage.app",
+    "messagingSenderId": "26443880227",
+    "appId": "1:26443880227:web:c0f5e7f9d325497e9e1e96",
+    "measurementId": "G-J1QMLJ1MHJ"
+}
 
 # Initialize Firebase if not already initialized
 if not firebase_admin._apps:
-    # In a real app, store these credentials securely and use environment variables
-    # For local testing, create a service account key file from Firebase console
-    cred = {
-        "type": "service_account",
-        "project_id": "task-management-system-xxxxx",
-        # Add other required fields for your Firebase service account
-    }
-    
-    # Initialize Firebase with credentials
     try:
-        cred_obj = credentials.Certificate(cred)
+        # For production use with your Firebase credentials
+        if os.path.exists("firebase_service_account.json"):
+            cred_obj = credentials.Certificate("firebase_service_account.json")
+        else:
+            # Create a minimal service account dict with just the project_id
+            cred = {
+                "type": "service_account",
+                "project_id": firebase_config["projectId"],
+            }
+            cred_obj = credentials.Certificate(cred)
+        
         firebase_admin.initialize_app(cred_obj)
-    except:
-        # For development purposes - this will help you initialize without actual credentials
-        st.warning("Running in demo mode: Firebase not connected. For production, add valid credentials.")
+        
+        # Initialize Pyrebase for authentication (Firebase Admin SDK doesn't support email/password auth directly)
+        firebase = pyrebase.initialize_app(firebase_config)
+        auth_instance = firebase.auth()
+        db_instance = firebase.database()
+        
+        st.session_state.firebase_configured = True
+    except Exception as e:
+        st.warning(f"Running in demo mode: {str(e)}")
+        st.session_state.firebase_configured = False
 
 # Page configuration
 st.set_page_config(
@@ -297,7 +318,8 @@ demo_db = DemoDatabase()
 
 def get_db():
     """Get database instance (either Firebase or demo)"""
-    if firebase_admin._apps:
+    if st.session_state.get("firebase_configured", False):
+        # Use Firestore for main database operations
         return firestore.client()
     else:
         return demo_db
@@ -305,13 +327,11 @@ def get_db():
 def authenticate_user(email, password):
     """Authenticate user with Firebase or demo DB"""
     try:
-        if firebase_admin._apps:
-            # Use Firebase Authentication
-            user = auth.get_user_by_email(email)
-            # In a real app, you'd verify the password with Firebase
-            # Here we're assuming success for simplicity
+        if st.session_state.get("firebase_configured", False):
+            # Use Firebase Authentication via Pyrebase
+            user = auth_instance.sign_in_with_email_and_password(email, password)
             username = email.split('@')[0]
-            return True, username, user.uid
+            return True, username, user['localId']
         else:
             # Use demo authentication
             if email in demo_db.users and demo_db.users[email]["password"] == password:
@@ -324,14 +344,11 @@ def authenticate_user(email, password):
 def create_user(email, password):
     """Create a new user with Firebase or demo DB"""
     try:
-        if firebase_admin._apps:
-            # Create user in Firebase Authentication
-            user = auth.create_user(
-                email=email,
-                password=password
-            )
+        if st.session_state.get("firebase_configured", False):
+            # Create user in Firebase Authentication via Pyrebase
+            user = auth_instance.create_user_with_email_and_password(email, password)
             username = email.split('@')[0]
-            return True, username, user.uid
+            return True, username, user['localId']
         else:
             # Create user in demo DB
             if email in demo_db.users:
