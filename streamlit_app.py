@@ -20,14 +20,14 @@ import plotly.graph_objects as go
 
 # Firebase configuration
 firebase_config = {
-  apiKey: "AIzaSyBTsa0pgK0R6aDOxPe_c_MBdKR4XaHPGGA",
-  authDomain: "tracking-c62bb.firebaseapp.com",
-  databaseURL: "https://tracking-c62bb-default-rtdb.firebaseio.com",
-  projectId: "tracking-c62bb",
-  storageBucket: "tracking-c62bb.firebasestorage.app",
-  messagingSenderId: "977902624059",
-  appId: "1:977902624059:web:165e120df5463bde332b1e",
-  measurementId: "G-PNHDJF45Z6"
+  "apiKey": "AIzaSyBTsa0pgK0R6aDOxPe_c_MBdKR4XaHPGGA",
+  "authDomain": "tracking-c62bb.firebaseapp.com",
+  "databaseURL": "https://tracking-c62bb-default-rtdb.firebaseio.com",
+  "projectId": "tracking-c62bb",
+  "storageBucket": "tracking-c62bb.firebasestorage.app",
+  "messagingSenderId": "977902624059",
+  "appId": "1:977902624059:web:165e120df5463bde332b1e",
+  "measurementId": "G-PNHDJF45Z6"
 }
 
 # Initialize Firebase
