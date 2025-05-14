@@ -13,7 +13,7 @@ firebaseConfig = {
   storageBucket: "tracking-c62bb.firebasestorage.app",
   messagingSenderId: "977902624059",
   appId: "1:977902624059:web:165e120df5463bde332b1e",
-  measurementId: "G-PNHDJF45Z6"}}
+  measurementId: "G-PNHDJF45Z6"}
 
 # Initialize Firebase
 try:
